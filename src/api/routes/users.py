@@ -1,24 +1,28 @@
+"""User-facing API routes for registration and lookup."""
+
 from uuid import uuid4
-from src.database.models import User
-from sqlalchemy import cast, or_, select, BigInteger
+
 from fastapi import APIRouter, HTTPException, Query
-from src.database.db_helpers import get_db_session
+from sqlalchemy import BigInteger, cast, or_, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+
+from src.database.db_helpers import get_db_session
+from src.database.models import User
 from src.repositories.user_repository import UserRepository
-from src.security.password import (
-    hash_password,
-    verify_password
-)
 from src.schemas.users_schema import (
     UserDetailesResponse,
+    UserNotFoundResponse,
+    UserSignUpErrorResponse,
     UserSignUpRequest,
     UserSignUpResponse,
-    UserSignUpErrorResponse,
-    UserNotFoundResponse,
 )
+from src.security.password import hash_password, verify_password
+from src.logging import get_logger
 
 
 user_router = APIRouter()
+logger = get_logger(__name__)
+
 
 @user_router.get(
     "/get-users-details",
@@ -36,7 +40,9 @@ async def get_user_details(
     Returns:
         list[UserDetailesResponse]: User list or filtered users.
     """
-    async with get_db_session() as session:  # Use session, not connection
+    logger.debug("Fetching user details", extra={"query": query})
+    # Use an async session context manager for safe cleanup.
+    async with get_db_session() as session:
         stmt = select(
             User.id,
             User.name,
@@ -46,6 +52,7 @@ async def get_user_details(
         )
 
         if query:
+            # Determine whether the query is a mobile number or email.
             if query.isdigit():
                 stmt = stmt.where(User.mobile_number == cast(int(query), BigInteger))
             else:
@@ -55,12 +62,15 @@ async def get_user_details(
         users = result.mappings().all()
 
         if not users:
+            # Return a structured error payload when no users match.
+            logger.info("No users found for query", extra={"query": query})
             raise HTTPException(
                 status_code=404,
                 detail=UserNotFoundResponse(message="User not found").model_dump(),
             )
 
-        # convert to list of Pydantic models
+        # Convert raw mappings into response schemas.
+        logger.info("Users fetched", extra={"count": len(users)})
         return [UserDetailesResponse(**user) for user in users]
 
 
@@ -75,13 +85,27 @@ async def get_user_details(
     },
 )
 async def sign_up_user(payload: UserSignUpRequest):
-    # 1️⃣ Password check
+    """
+    Register a new user in the system.
+
+    Validates password confirmation, ensures uniqueness, hashes the password,
+    and inserts the user record.
+    """
+    logger.info(
+        "User signup requested",
+        extra={"email": payload.email, "mobile_number": payload.mobile_number},
+    )
+    # 1) Password confirmation check.
     if payload.password != payload.confirm_password:
+        logger.warning(
+            "Password confirmation failed",
+            extra={"email": payload.email, "mobile_number": payload.mobile_number},
+        )
         raise HTTPException(
             status_code=400,
             detail=UserSignUpErrorResponse(
-                name=payload.name,
                 email=payload.email,
+                mobile_number=payload.mobile_number,
                 message="Passwords do not match",
             ).model_dump(),
         )
@@ -91,13 +115,17 @@ async def sign_up_user(payload: UserSignUpRequest):
             email = payload.email.lower().strip()
             mobile_number = payload.mobile_number
 
-            # 2️⃣ Check existing user
+            # 2) Prevent duplicate registration by email or mobile.
             existing_user = await UserRepository.get_by_email_or_mobile(
                 session,
                 email,
                 mobile_number,
             )
             if existing_user:
+                logger.warning(
+                    "Duplicate user registration attempt",
+                    extra={"email": email, "mobile_number": mobile_number},
+                )
                 raise HTTPException(
                     status_code=409,
                     detail=UserSignUpErrorResponse(
@@ -107,7 +135,7 @@ async def sign_up_user(payload: UserSignUpRequest):
                     ).model_dump(),
                 )
 
-            # 3️⃣ Create user
+            # 3) Build the ORM model and hash the password.
             create_user = User(
                 name=payload.name.strip() if payload.name else None,
                 email=email,
@@ -118,6 +146,11 @@ async def sign_up_user(payload: UserSignUpRequest):
 
             user = await UserRepository.create_user(session, create_user)
 
+            # 4) Return a structured success response.
+            logger.info(
+                "User registration successful",
+                extra={"user_id": str(user.id), "email": user.email},
+            )
             return UserSignUpResponse(
                 id=user.id,
                 email=user.email,
@@ -128,6 +161,11 @@ async def sign_up_user(payload: UserSignUpRequest):
             )
 
         except IntegrityError:
+            # Unique constraints (email/mobile) can still raise race errors.
+            logger.warning(
+                "User registration integrity error",
+                extra={"email": payload.email, "mobile_number": payload.mobile_number},
+            )
             raise HTTPException(
                 status_code=409,
                 detail=UserSignUpErrorResponse(
@@ -138,6 +176,11 @@ async def sign_up_user(payload: UserSignUpRequest):
             )
 
         except SQLAlchemyError:
+            # Generic database error handling for unexpected failures.
+            logger.exception(
+                "User registration failed due to database error",
+                extra={"email": payload.email, "mobile_number": payload.mobile_number},
+            )
             raise HTTPException(
                 status_code=500,
                 detail=UserSignUpErrorResponse(

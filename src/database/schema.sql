@@ -1,3 +1,6 @@
+-- PostgreSQL schema for the application.
+-- This file defines extensions, tables, triggers, and indexes.
+
 -- Extensions
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 CREATE EXTENSION IF NOT EXISTS citext;
