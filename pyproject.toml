@@ -1,0 +1,18 @@
+[project]
+name = "fastapi-auth-voult"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "alembic>=1.18.1",
+    "asyncpg>=0.31.0",
+    "bcrypt==3.2.2",
+    "fastapi[standard]>=0.128.0",
+    "greenlet>=3.3.1",
+    "ipython>=9.9.0",
+    "passlib==1.7.4",
+    "python-dotenv>=1.2.1",
+    "sqlalchemy>=2.0.46",
+    "uvicorn>=0.40.0",
+]
