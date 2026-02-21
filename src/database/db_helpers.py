@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
+from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -51,6 +52,9 @@ async def get_db_session() -> AsyncIterator[AsyncSession]:
             logger.debug("Database session opened")
             yield session
             logger.debug("Database session closing")
+        except HTTPException:
+            # HTTP exceptions are expected control flow from route handlers.
+            raise
         except Exception:
             logger.exception("Database session error")
             raise

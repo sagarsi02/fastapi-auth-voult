@@ -1,142 +1,121 @@
 """User-facing API routes for registration and lookup."""
-
-from uuid import uuid4
-
-from fastapi import APIRouter, HTTPException, Query
-from sqlalchemy import BigInteger, cast, or_, select
+from datetime import datetime, timedelta, timezone
+from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from src.config import settings
+from src.logging import get_logger
+from src.database.models import User, RefreshToken
 from src.database.db_helpers import get_db_session
-from src.database.models import User
 from src.repositories.user_repository import UserRepository
+from src.security.password import hash_password, verify_password
+from src.rules.jwt import create_access_token, create_refresh_token
+from src.utils.strings import normalize_email
+
+from src.rules.depends import (
+    RefreshTokenContext,
+    hash_data,
+    validate_refresh_token,
+    validate_access_token_and_user_exists,
+)
+
 from src.schemas.users_schema import (
     UserDetailesResponse,
-    UserNotFoundResponse,
-    UserSignUpErrorResponse,
+    UserLogoutResponse,
+    UserLogoutRequest,
+    UserLoginRequest,
+    UserLoginResponse,
+    RefreshTokenResponse,
     UserSignUpRequest,
     UserSignUpResponse,
 )
-from src.security.password import hash_password, verify_password
-from src.logging import get_logger
 
 
 user_router = APIRouter()
 logger = get_logger(__name__)
 
 
+def internal_server_error_response(detail: str | dict = "Something went wrong. Please try again later.") -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail=detail,
+    )
+
+
+# ====================================
+#  USER DETAILS API
+# ====================================
 @user_router.get(
-    "/get-users-details",
-    response_model=list[UserDetailesResponse] | UserNotFoundResponse,
-    responses={404: {"model": UserNotFoundResponse}},
+    "/me",
+    response_model=UserDetailesResponse,
 )
 async def get_user_details(
-    query: str | None = Query(
-        default=None, description="Email or mobile number"
-    ),
-) -> list[UserDetailesResponse]:
-    """
-    Get All Users List or Specific User Based on Email or Mobile Number
+    current_user: User = Depends(validate_access_token_and_user_exists),
+) -> UserDetailesResponse:
 
-    Returns:
-        list[UserDetailesResponse]: User list or filtered users.
-    """
-    logger.debug("Fetching user details", extra={"query": query})
-    # Use an async session context manager for safe cleanup.
-    async with get_db_session() as session:
-        stmt = select(
-            User.id,
-            User.name,
-            User.email,
-            User.mobile_number,
-            User.city,
+        return UserDetailesResponse(
+            id=current_user.id,
+            name=current_user.name,
+            role=current_user.role,
+            email=current_user.email,
+            mobile_number=current_user.mobile_number,
+            city=current_user.city,
         )
 
-        if query:
-            # Determine whether the query is a mobile number or email.
-            if query.isdigit():
-                stmt = stmt.where(User.mobile_number == cast(int(query), BigInteger))
-            else:
-                stmt = stmt.where(User.email == query.lower().strip())
-
-        result = await session.execute(stmt)
-        users = result.mappings().all()
-
-        if not users:
-            # Return a structured error payload when no users match.
-            logger.info("No users found for query", extra={"query": query})
-            raise HTTPException(
-                status_code=404,
-                detail=UserNotFoundResponse(message="User not found").model_dump(),
-            )
-
-        # Convert raw mappings into response schemas.
-        logger.info("Users fetched", extra={"count": len(users)})
-        return [UserDetailesResponse(**user) for user in users]
 
 
+# ====================================
+#  USER SINGUP API
+# ====================================
 @user_router.post(
     "/register-user",
-    response_model=UserSignUpResponse | UserSignUpErrorResponse,
+    response_model=UserSignUpResponse,
     status_code=201,
-    responses={
-        400: {"model": UserSignUpErrorResponse},
-        409: {"model": UserSignUpErrorResponse},
-        500: {"model": UserSignUpErrorResponse},
-    },
 )
 async def sign_up_user(payload: UserSignUpRequest):
     """
     Register a new user in the system.
-
-    Validates password confirmation, ensures uniqueness, hashes the password,
+    Validates input, ensures uniqueness, hashes password,
     and inserts the user record.
     """
+
     logger.info(
         "User signup requested",
-        extra={"email": payload.email, "mobile_number": payload.mobile_number},
+        extra={"email": payload.email},
     )
-    # 1) Password confirmation check.
+
+    # 1️⃣ Password confirmation check
     if payload.password != payload.confirm_password:
-        logger.warning(
-            "Password confirmation failed",
-            extra={"email": payload.email, "mobile_number": payload.mobile_number},
-        )
         raise HTTPException(
-            status_code=400,
-            detail=UserSignUpErrorResponse(
-                email=payload.email,
-                mobile_number=payload.mobile_number,
-                message="Passwords do not match",
-            ).model_dump(),
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "message": "Passwords do not match",
+            },
         )
 
     async with get_db_session() as session:
         try:
-            email = payload.email.lower().strip()
+            email = normalize_email(payload.email)
             mobile_number = payload.mobile_number
 
-            # 2) Prevent duplicate registration by email or mobile.
-            existing_user = await UserRepository.get_by_email_or_mobile(
+            # 2️⃣ Duplicate check
+            existing_user = await UserRepository.get_user_data_by_email(
                 session,
                 email,
-                mobile_number,
             )
+
             if existing_user:
-                logger.warning(
-                    "Duplicate user registration attempt",
-                    extra={"email": email, "mobile_number": mobile_number},
-                )
                 raise HTTPException(
-                    status_code=409,
-                    detail=UserSignUpErrorResponse(
-                        email=email,
-                        mobile_number=mobile_number,
-                        message="User already exists",
-                    ).model_dump(),
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "success": False,
+                        "message": "User already exists",
+                    },
                 )
 
-            # 3) Build the ORM model and hash the password.
-            create_user = User(
+            # 3️⃣ Create user
+            new_user = User(
                 name=payload.name.strip() if payload.name else None,
                 email=email,
                 mobile_number=mobile_number,
@@ -144,13 +123,13 @@ async def sign_up_user(payload: UserSignUpRequest):
                 password_hash=hash_password(payload.password),
             )
 
-            user = await UserRepository.create_user(session, create_user)
+            user = await UserRepository.create_user(session, new_user)
 
-            # 4) Return a structured success response.
             logger.info(
                 "User registration successful",
                 extra={"user_id": str(user.id), "email": user.email},
             )
+
             return UserSignUpResponse(
                 id=user.id,
                 email=user.email,
@@ -161,31 +140,282 @@ async def sign_up_user(payload: UserSignUpRequest):
             )
 
         except IntegrityError:
-            # Unique constraints (email/mobile) can still raise race errors.
-            logger.warning(
-                "User registration integrity error",
-                extra={"email": payload.email, "mobile_number": payload.mobile_number},
-            )
             raise HTTPException(
-                status_code=409,
-                detail=UserSignUpErrorResponse(
-                    name=payload.name,
-                    email=payload.email,
-                    message="User already exists",
-                ).model_dump(),
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "success": False,
+                    "message": "User already exists",
+                },
             )
 
         except SQLAlchemyError:
-            # Generic database error handling for unexpected failures.
-            logger.exception(
-                "User registration failed due to database error",
-                extra={"email": payload.email, "mobile_number": payload.mobile_number},
+            logger.exception("Database error during user registration")
+            raise internal_server_error_response(
+                {
+                    "success": False,
+                    "message": "Something went wrong. Please try again later.",
+                }
             )
-            raise HTTPException(
-                status_code=500,
-                detail=UserSignUpErrorResponse(
-                    name=payload.name,
-                    email=payload.email,
-                    message="Something went wrong. Please try again later.",
-                ).model_dump(),
+
+
+# ====================================
+#  USER LOGIN API
+# ====================================
+@user_router.post(
+    "/login-user",
+    response_model=UserLoginResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def login_user(payload: UserLoginRequest):
+    """
+    Multi-device login with max 5 active sessions.
+    """
+
+    identifier = normalize_email(payload.email)
+    logger.info("User login requested", extra={"email": identifier})
+
+    async with get_db_session() as session:
+        try:
+            # --------------------------
+            # 1️⃣ Fetch User
+            # --------------------------
+            user = await UserRepository.get_user_data_by_email(
+                session,
+                identifier,
+                for_update=True,
             )
+
+            if (
+                user is None
+                or not user.is_active
+                or not verify_password(payload.password, user.password_hash)
+            ):
+                logger.warning("Login failed", extra={"email": identifier})
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid credentials",
+                )
+
+            # --------------------------
+            # 2️⃣ Cleanup expired tokens
+            # --------------------------
+            now_utc = datetime.now(timezone.utc)
+            await UserRepository.revoke_expired_refresh_tokens(session, now_utc)
+
+            # --------------------------
+            # 3️⃣ Count active sessions
+            # --------------------------
+            active_sessions = await UserRepository.count_active_refresh_tokens(
+                session=session,
+                user_id=user.id,
+                now_utc=now_utc,
+            )
+
+            if active_sessions >= settings.MAX_ACTIVE_DEVICES:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Maximum login limit ({settings.MAX_ACTIVE_DEVICES}) reached. Logout from another device.",
+                )
+
+            # --------------------------
+            # 4️⃣ Generate Tokens
+            # --------------------------
+            access_token = create_access_token(user.id, user.role)
+            session_expires_at = now_utc + timedelta(
+                days=settings.REFRESH_SESSION_EXPIRE_DAYS
+            )
+            refresh_expires_at = min(
+                now_utc + timedelta(
+                    days=settings.REFRESH_EXPIRE_DAYS
+                ),
+                session_expires_at,
+            )
+            refresh_token = create_refresh_token(
+                user.id,
+                user.role,
+                refresh_expires_at,
+            )
+            hashed_refresh_token = hash_data(refresh_token)
+
+            expires_at = refresh_expires_at
+
+            refresh_token_expires_in_days = max(
+                0,
+                int(
+                    (refresh_expires_at - now_utc).total_seconds() // 86400
+                ),
+            )
+
+            # --------------------------
+            # 5️⃣ Insert new refresh token
+            # --------------------------
+            new_refresh = RefreshToken(
+                user_id=user.id,
+                token=hashed_refresh_token,
+                is_revoked=False,
+                created_at=now_utc,
+                expires_at=expires_at,
+                session_expires_at=session_expires_at,
+                device_info=payload.device_info if hasattr(payload, "device_info") else None,
+            )
+
+            session.add(new_refresh)
+
+            # --------------------------
+            # 6️⃣ Update last login
+            # --------------------------
+            user.last_login_at = now_utc
+
+            await session.commit()
+
+            logger.info(
+                "User login successful",
+                extra={"user_id": str(user.id)},
+            )
+
+            return UserLoginResponse(
+                access_token=access_token,
+                refresh_token=refresh_token,
+                token_type="bearer",
+                access_token_expires_in_seconds=settings.ACCESS_EXPIRE_MINUTES * 60,
+                refresh_token_expires_in_days=refresh_token_expires_in_days,
+                user={
+                    "user_id": user.id,
+                    "email": user.email,
+                    "role": user.role,
+                    "message": "User logged in successfully",
+                },
+            )
+
+        except HTTPException:
+            raise
+
+        except SQLAlchemyError:
+            await session.rollback()
+            logger.exception("Database error during login")
+
+            raise internal_server_error_response()
+    
+
+# ====================================
+#  USER LOGOUT API
+# ====================================
+@user_router.post("/logout-user", response_model=UserLogoutResponse)
+async def logout_user(
+    payload: UserLogoutRequest,
+    current_user: User = Depends(validate_access_token_and_user_exists),
+):
+    async with get_db_session() as session:
+        try:
+            hashed_token = hash_data(payload.refresh_token)
+
+            refresh_token_obj = await UserRepository.get_active_refresh_token(
+                session=session,
+                user_id=current_user.id,
+                hashed_token=hashed_token,
+            )
+
+            if not refresh_token_obj:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or revoked refresh token",
+                )
+
+            refresh_token_obj.is_revoked = True
+            await session.commit()
+
+            return UserLogoutResponse(
+                message="User logged out successfully"
+            )
+
+        except SQLAlchemyError:
+            await session.rollback()
+            raise internal_server_error_response("Something went wrong")
+
+
+# ====================================
+#  GET ACCESS TOKEN VIA REFRESH TOKEN API
+# ====================================
+@user_router.post(
+    "/get-access-token-from-refresh-token",
+    response_model=RefreshTokenResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def get_access_token_from_refresh_token(
+    refresh_context: RefreshTokenContext = Depends(validate_refresh_token),
+):
+    current_user = refresh_context.user
+    raw_refresh_token = refresh_context.refresh_token
+    now_utc = datetime.now(timezone.utc)
+    hashed_current_refresh = hash_data(raw_refresh_token)
+
+    async with get_db_session() as session:
+        try:
+            current_refresh = await UserRepository.get_active_refresh_token(
+                session=session,
+                user_id=current_user.id,
+                hashed_token=hashed_current_refresh,
+                now_utc=now_utc,
+                for_update=True,
+            )
+
+            if current_refresh is None:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid or revoked refresh token",
+                )
+
+            if current_refresh.session_expires_at <= now_utc:
+                current_refresh.is_revoked = True
+                await session.commit()
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Refresh session expired. Please login again.",
+                )
+
+            refresh_expires_at = min(
+                now_utc + timedelta(days=settings.REFRESH_EXPIRE_DAYS),
+                current_refresh.session_expires_at,
+            )
+
+            access_token = create_access_token(current_user.id, current_user.role)
+            new_refresh_token = create_refresh_token(
+                current_user.id,
+                current_user.role,
+                refresh_expires_at,
+            )
+            new_hashed_refresh = hash_data(new_refresh_token)
+
+            current_refresh.is_revoked = True
+            rotated_refresh = RefreshToken(
+                user_id=current_user.id,
+                token=new_hashed_refresh,
+                is_revoked=False,
+                created_at=now_utc,
+                expires_at=refresh_expires_at,
+                session_expires_at=current_refresh.session_expires_at,
+                device_info=current_refresh.device_info,
+            )
+            session.add(rotated_refresh)
+            await session.commit()
+
+            refresh_token_expires_in_days = max(
+                0,
+                int(
+                    (refresh_expires_at - now_utc).total_seconds() // 86400
+                ),
+            )
+
+            return RefreshTokenResponse(
+                access_token=access_token,
+                refresh_token=new_refresh_token,
+                token_type="bearer",
+                access_token_expires_in_seconds=settings.ACCESS_EXPIRE_MINUTES * 60,
+                refresh_token_expires_in_days=refresh_token_expires_in_days,
+            )
+        except HTTPException:
+            raise
+        except SQLAlchemyError:
+            await session.rollback()
+            logger.exception("Database error during token refresh")
+            raise internal_server_error_response()
