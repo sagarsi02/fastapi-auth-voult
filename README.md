@@ -11,6 +11,7 @@ Production-style authentication boilerplate built with FastAPI + PostgreSQL + JW
 - 🔄 Refresh token rotation (old refresh token revoke on use)
 - ⏳ Absolute refresh session expiry (`session_expires_at`)
 - 📱 Multi-device login cap (`MAX_ACTIVE_DEVICES`)
+- 🚦 Redis-based sliding-window rate limiting
 - 🧱 SQLAlchemy async + PostgreSQL
 - 📜 Structured logging support
 
@@ -97,6 +98,17 @@ ACCESS_EXPIRE_MINUTES=15
 REFRESH_EXPIRE_DAYS=7
 REFRESH_SESSION_EXPIRE_DAYS=30
 MAX_ACTIVE_DEVICES=5
+REDIS_URL=redis://:your_redis_password@localhost:6379/0
+
+LOGIN_RATE_LIMIT_MAX_REQUESTS=5
+LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
+
+SIGNUP_RATE_LIMIT_USER_MAX_REQUESTS=2
+SIGNUP_RATE_LIMIT_NON_USER_MAX_REQUESTS=10
+SIGNUP_RATE_LIMIT_WINDOW_SECONDS=60
+
+USER_DETAILS_RATE_LIMIT_MAX_REQUESTS=5
+USER_DETAILS_RATE_LIMIT_WINDOW_SECONDS=60
 ```
 
 ### 5. Generate RSA Keys (if not present)
@@ -220,6 +232,64 @@ If you want different absolute session window, replace `INTERVAL '30 days'` acco
 
 - Endpoint: `POST /users/logout-user`
 - Revokes the provided refresh token.
+
+---
+
+## 🚦 Rate Limits (API-wise)
+
+Rate limiting uses Redis sorted-set sliding window. Keys are tracked by IP and/or user identifier depending on endpoint.
+
+### 1. Login API
+
+- Endpoint: `POST /users/login-user`
+- Key strategy: `login:user-ip:{normalized_email}:{client_ip}`
+- Default: `5 requests / 60 seconds`
+- Env:
+  - `LOGIN_RATE_LIMIT_MAX_REQUESTS`
+  - `LOGIN_RATE_LIMIT_WINDOW_SECONDS`
+
+### 2. Signup API
+
+- Endpoint: `POST /users/register-user`
+- Key strategy: `signup:role-ip:{role}:{client_ip}`
+- Default:
+  - role `user`: `2 requests / 60 seconds`
+  - non-user roles: `10 requests / 60 seconds`
+- Env:
+  - `SIGNUP_RATE_LIMIT_USER_MAX_REQUESTS`
+  - `SIGNUP_RATE_LIMIT_NON_USER_MAX_REQUESTS`
+  - `SIGNUP_RATE_LIMIT_WINDOW_SECONDS`
+
+### 3. User Details API
+
+- Endpoint: `GET /users/me`
+- Key strategy (both checks applied):
+  - `user-details:user:{user_id}`
+  - `user-details:ip:{client_ip}`
+- Default: `5 requests / 60 seconds`
+- Env:
+  - `USER_DETAILS_RATE_LIMIT_MAX_REQUESTS`
+  - `USER_DETAILS_RATE_LIMIT_WINDOW_SECONDS`
+
+### 4. How To Override Limits
+
+1. Open `.env`.
+2. Change required rate-limit variables.
+3. Restart server.
+
+Example:
+
+```env
+LOGIN_RATE_LIMIT_MAX_REQUESTS=8
+LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
+USER_DETAILS_RATE_LIMIT_MAX_REQUESTS=20
+USER_DETAILS_RATE_LIMIT_WINDOW_SECONDS=60
+```
+
+### 5. Notes
+
+- If `REDIS_URL` is missing/unavailable, limiter is fail-open (requests are allowed).
+- `Retry-After` header is returned with configured window seconds when 429 occurs.
 
 ---
 
