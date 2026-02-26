@@ -1,7 +1,7 @@
 """User-facing API routes for registration and lookup."""
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, HTTPException, Depends, status
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
+from fastapi import APIRouter, HTTPException, Depends, status, Request
 
 from src.config import settings
 from src.logging import get_logger
@@ -10,7 +10,12 @@ from src.database.db_helpers import get_db_session
 from src.repositories.user_repository import UserRepository
 from src.security.password import hash_password, verify_password
 from src.rules.jwt import create_access_token, create_refresh_token
-from src.utils.strings import normalize_email
+from src.utils.helpers import (
+    enforce_login_rate_limit,
+    enforce_signup_rate_limit,
+    enforce_user_details_rate_limit,
+    normalize_email,
+)
 
 from src.rules.depends import (
     RefreshTokenContext,
@@ -50,17 +55,19 @@ def internal_server_error_response(detail: str | dict = "Something went wrong. P
     response_model=UserDetailesResponse,
 )
 async def get_user_details(
+    request: Request,
     current_user: User = Depends(validate_access_token_and_user_exists),
 ) -> UserDetailesResponse:
+    await enforce_user_details_rate_limit(request, str(current_user.id))
 
-        return UserDetailesResponse(
-            id=current_user.id,
-            name=current_user.name,
-            role=current_user.role,
-            email=current_user.email,
-            mobile_number=current_user.mobile_number,
-            city=current_user.city,
-        )
+    return UserDetailesResponse(
+        id=current_user.id,
+        name=current_user.name,
+        role=current_user.role,
+        email=current_user.email,
+        mobile_number=current_user.mobile_number,
+        city=current_user.city,
+    )
 
 
 
@@ -72,7 +79,7 @@ async def get_user_details(
     response_model=UserSignUpResponse,
     status_code=201,
 )
-async def sign_up_user(payload: UserSignUpRequest):
+async def sign_up_user(request: Request, payload: UserSignUpRequest):
     """
     Register a new user in the system.
     Validates input, ensures uniqueness, hashes password,
@@ -83,6 +90,8 @@ async def sign_up_user(payload: UserSignUpRequest):
         "User signup requested",
         extra={"email": payload.email},
     )
+
+    await enforce_signup_rate_limit(request, getattr(payload, "role", "user"))
 
     # 1️⃣ Password confirmation check
     if payload.password != payload.confirm_password:
@@ -117,6 +126,7 @@ async def sign_up_user(payload: UserSignUpRequest):
             # 3️⃣ Create user
             new_user = User(
                 name=payload.name.strip() if payload.name else None,
+                role=(payload.role or "user").strip().lower(),
                 email=email,
                 mobile_number=mobile_number,
                 city=payload.city.strip() if payload.city else None,
@@ -166,13 +176,16 @@ async def sign_up_user(payload: UserSignUpRequest):
     response_model=UserLoginResponse,
     status_code=status.HTTP_200_OK,
 )
-async def login_user(payload: UserLoginRequest):
+async def login_user(request: Request, payload: UserLoginRequest):
     """
     Multi-device login with max 5 active sessions.
     """
 
     identifier = normalize_email(payload.email)
     logger.info("User login requested", extra={"email": identifier})
+
+    # Check Rate Limit
+    await enforce_login_rate_limit(request, identifier)
 
     async with get_db_session() as session:
         try:
