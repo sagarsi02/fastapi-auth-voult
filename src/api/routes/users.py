@@ -1,4 +1,5 @@
 """User-facing API routes for registration and lookup."""
+
 from datetime import datetime, timedelta, timezone
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from fastapi import APIRouter, HTTPException, Depends, status, Request
@@ -40,7 +41,9 @@ user_router = APIRouter()
 logger = get_logger(__name__)
 
 
-def internal_server_error_response(detail: str | dict = "Something went wrong. Please try again later.") -> HTTPException:
+def internal_server_error_response(
+    detail: str | dict = "Something went wrong. Please try again later.",
+) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=detail,
@@ -68,7 +71,6 @@ async def get_user_details(
         mobile_number=current_user.mobile_number,
         city=current_user.city,
     )
-
 
 
 # ====================================
@@ -238,9 +240,7 @@ async def login_user(request: Request, payload: UserLoginRequest):
                 days=settings.REFRESH_SESSION_EXPIRE_DAYS
             )
             refresh_expires_at = min(
-                now_utc + timedelta(
-                    days=settings.REFRESH_EXPIRE_DAYS
-                ),
+                now_utc + timedelta(days=settings.REFRESH_EXPIRE_DAYS),
                 session_expires_at,
             )
             refresh_token = create_refresh_token(
@@ -254,9 +254,7 @@ async def login_user(request: Request, payload: UserLoginRequest):
 
             refresh_token_expires_in_days = max(
                 0,
-                int(
-                    (refresh_expires_at - now_utc).total_seconds() // 86400
-                ),
+                int((refresh_expires_at - now_utc).total_seconds() // 86400),
             )
 
             # --------------------------
@@ -269,7 +267,9 @@ async def login_user(request: Request, payload: UserLoginRequest):
                 created_at=now_utc,
                 expires_at=expires_at,
                 session_expires_at=session_expires_at,
-                device_info=payload.device_info if hasattr(payload, "device_info") else None,
+                device_info=payload.device_info
+                if hasattr(payload, "device_info")
+                else None,
             )
 
             session.add(new_refresh)
@@ -308,7 +308,7 @@ async def login_user(request: Request, payload: UserLoginRequest):
             logger.exception("Database error during login")
 
             raise internal_server_error_response()
-    
+
 
 # ====================================
 #  USER LOGOUT API
@@ -337,9 +337,7 @@ async def logout_user(
             refresh_token_obj.is_revoked = True
             await session.commit()
 
-            return UserLogoutResponse(
-                message="User logged out successfully"
-            )
+            return UserLogoutResponse(message="User logged out successfully")
 
         except SQLAlchemyError:
             await session.rollback()
@@ -414,9 +412,7 @@ async def get_access_token_from_refresh_token(
 
             refresh_token_expires_in_days = max(
                 0,
-                int(
-                    (refresh_expires_at - now_utc).total_seconds() // 86400
-                ),
+                int((refresh_expires_at - now_utc).total_seconds() // 86400),
             )
 
             return RefreshTokenResponse(

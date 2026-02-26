@@ -26,7 +26,13 @@ class User(Base):
     __tablename__ = "users"
 
     # Primary key.
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, unique=True, nullable=False)
+    id = Column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+        unique=True,
+        nullable=False,
+    )
 
     # Profile fields.
     name = Column(String(255), nullable=True)
@@ -42,8 +48,15 @@ class User(Base):
 
     # Auditing timestamps.
     last_login_at = Column(TIMESTAMP(timezone=True), nullable=True)
-    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()"))
-    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()"), onupdate=text("NOW()"))
+    created_at = Column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("NOW()")
+    )
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("NOW()"),
+        onupdate=text("NOW()"),
+    )
 
 
 class RefreshToken(Base):
@@ -55,7 +68,7 @@ class RefreshToken(Base):
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
-        index=True
+        index=True,
     )
 
     # SHA-256 hashed refresh token
@@ -64,9 +77,7 @@ class RefreshToken(Base):
     is_revoked = Column(Boolean, default=False, nullable=False)
 
     created_at = Column(
-        TIMESTAMP(timezone=True),
-        nullable=False,
-        server_default=func.now()
+        TIMESTAMP(timezone=True), nullable=False, server_default=func.now()
     )
 
     expires_at = Column(
@@ -83,6 +94,4 @@ class RefreshToken(Base):
     # Optional but recommended for multi-device
     device_info = Column(String, nullable=True)
 
-    __table_args__ = (
-        Index("idx_user_token", "user_id", "token"),
-    )
+    __table_args__ = (Index("idx_user_token", "user_id", "token"),)

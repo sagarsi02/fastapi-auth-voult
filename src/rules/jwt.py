@@ -15,12 +15,7 @@ with open(PRIVATE_KEY_PATH, "r") as f:
 
 def create_access_token(user_id: UUID, role: str):
     expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_EXPIRE_MINUTES)
-    payload = {
-        "user_id": str(user_id),
-        "role": role,
-        "type": "access",
-        "exp": expire
-    }
+    payload = {"user_id": str(user_id), "role": role, "type": "access", "exp": expire}
     return jwt.encode(payload, PRIVATE_KEY, algorithm=ALGORITHM)
 
 
@@ -34,6 +29,6 @@ def create_refresh_token(
         "role": role,
         "type": "refresh",
         "exp": expire_at,
-        "jti": str(uuid.uuid4())  # unique id (recommended for prod)
+        "jti": str(uuid.uuid4()),  # unique id (recommended for prod)
     }
     return jwt.encode(payload, PRIVATE_KEY, algorithm=ALGORITHM)

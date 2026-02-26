@@ -10,6 +10,7 @@ from src.services.redis_rate_limit import (
     user_details_limiter,
 )
 
+
 def normalize_email(email: str) -> str:
     """Return normalized email for consistent lookup and storage."""
     return email.strip().lower()
@@ -48,7 +49,9 @@ async def enforce_signup_rate_limit(request: Request, role: str = "user") -> Non
     ip_address = get_client_ip(request)
     signup_ip_key = f"signup:role-ip:{normalized_role}:{ip_address}"
 
-    limiter = signup_user_limiter if normalized_role == "user" else signup_non_user_limiter
+    limiter = (
+        signup_user_limiter if normalized_role == "user" else signup_non_user_limiter
+    )
     if not await limiter.is_allowed(signup_ip_key):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -69,5 +72,7 @@ async def enforce_user_details_rate_limit(request: Request, user_id: str) -> Non
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail="Too many profile requests. Try again later.",
-            headers={"Retry-After": str(settings.USER_DETAILS_RATE_LIMIT_WINDOW_SECONDS)},
+            headers={
+                "Retry-After": str(settings.USER_DETAILS_RATE_LIMIT_WINDOW_SECONDS)
+            },
         )
