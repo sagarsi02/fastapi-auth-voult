@@ -14,8 +14,6 @@ def _resolve_log_level() -> int:
     return logging.DEBUG
 
 
-
-
 def setup_logging() -> None:
     """Configure root logging only once."""
     level = _resolve_log_level()

@@ -12,7 +12,11 @@ from fastapi.testclient import TestClient
 
 from src.main import create_app
 from src.database.models import User
-from src.rules.depends import RefreshTokenContext, validate_access_token_and_user_exists, validate_refresh_token
+from src.rules.depends import (
+    RefreshTokenContext,
+    validate_access_token_and_user_exists,
+    validate_refresh_token,
+)
 import src.api.routes.users as users_routes
 
 
@@ -62,7 +66,9 @@ def app(monkeypatch: pytest.MonkeyPatch):
         return make_user()
 
     async def override_refresh():
-        return RefreshTokenContext(user=make_user(), refresh_token="refresh-token-12345")
+        return RefreshTokenContext(
+            user=make_user(), refresh_token="refresh-token-12345"
+        )
 
     app.dependency_overrides[validate_access_token_and_user_exists] = override_user
     app.dependency_overrides[validate_refresh_token] = override_refresh

@@ -3,11 +3,7 @@
 from passlib.context import CryptContext
 
 # Configure bcrypt with a reasonable work factor.
-pwd_context = CryptContext(
-    schemes=["bcrypt"],
-    deprecated="auto",
-    bcrypt__rounds=12
-)
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto", bcrypt__rounds=12)
 
 
 def hash_password(password: str) -> str:

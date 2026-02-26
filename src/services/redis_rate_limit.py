@@ -21,7 +21,9 @@ def _build_client() -> redis.Redis | None:
 
 
 class AsyncSlidingWindowRateLimiter:
-    def __init__(self, redis_client: redis.Redis | None, limit: int, window_seconds: int):
+    def __init__(
+        self, redis_client: redis.Redis | None, limit: int, window_seconds: int
+    ):
         self.redis = redis_client
         self.limit = limit
         self.window = window_seconds

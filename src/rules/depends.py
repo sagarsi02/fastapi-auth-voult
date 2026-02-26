@@ -26,11 +26,13 @@ class RefreshTokenContext:
 
 # ---------------- HASG & VERIFY HASH ----------------
 
+
 def hash_data(data: str) -> str:
     return hashlib.sha256(data.encode()).hexdigest()
 
 
 # ---------------- TOKEN VERIFICATION ----------------
+
 
 def decode_and_validate_token(
     token: str,
@@ -38,11 +40,7 @@ def decode_and_validate_token(
     require_role: bool = False,
 ) -> dict:
     try:
-        payload = jwt.decode(
-            token,
-            PUBLIC_SECRET_KEY,
-            algorithms=ALGORITHM
-        )
+        payload = jwt.decode(token, PUBLIC_SECRET_KEY, algorithms=ALGORITHM)
     except JWTError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -86,6 +84,7 @@ async def access_token_verify(token: str) -> UUID:
 
 # ---------------- USER FETCH ----------------
 
+
 async def get_user_data(user_id: UUID) -> User:
     async with get_db_session() as session:
         user = await UserRepository.get_user_data_by_id(session, user_id)
@@ -100,7 +99,7 @@ async def get_user_data(user_id: UUID) -> User:
 
 
 async def validate_access_token_and_user_exists(
-    credentials: HTTPAuthorizationCredentials = Depends(security)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
 ):
     token = credentials.credentials
 
@@ -108,7 +107,6 @@ async def validate_access_token_and_user_exists(
     user = await get_user_data(user_id)
 
     return user
-
 
 
 async def validate_refresh_token(
@@ -120,7 +118,7 @@ async def validate_refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="No refresh token provided",
         )
-    
+
     payload = decode_and_validate_token(
         token,
         expected_type="refresh",
@@ -152,9 +150,7 @@ async def check_refresh_token_revoked(refresh_token: str, user_id: UUID):
             now_utc=now_utc,
         )
 
-        if (
-            refresh_table_data is None
-        ):
+        if refresh_table_data is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid or revoked refresh token",

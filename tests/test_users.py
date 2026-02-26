@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 import src.api.routes.users as users_routes
 from src.repositories.user_repository import UserRepository
 from src.database.models import User
-from src.rules.depends import RefreshTokenContext
 
 
 def _signup_payload(**overrides):
@@ -62,7 +61,9 @@ def test_register_user_success(client: TestClient, monkeypatch: pytest.MonkeyPat
         user.is_verified = False
         return user
 
-    monkeypatch.setattr(UserRepository, "get_user_data_by_email", fake_get_user_data_by_email)
+    monkeypatch.setattr(
+        UserRepository, "get_user_data_by_email", fake_get_user_data_by_email
+    )
     monkeypatch.setattr(UserRepository, "create_user", fake_create_user)
     monkeypatch.setattr(users_routes, "hash_password", lambda _pwd: "hashed")
 
@@ -88,7 +89,9 @@ def test_register_user_duplicate(client: TestClient, monkeypatch: pytest.MonkeyP
     async def fake_get_user_data_by_email(_session, _email, for_update=False):
         return _make_user()
 
-    monkeypatch.setattr(UserRepository, "get_user_data_by_email", fake_get_user_data_by_email)
+    monkeypatch.setattr(
+        UserRepository, "get_user_data_by_email", fake_get_user_data_by_email
+    )
 
     response = client.post("/users/register-user", json=_signup_payload())
 
@@ -108,9 +111,17 @@ def test_login_user_success(client: TestClient, monkeypatch: pytest.MonkeyPatch)
     async def fake_count_active_refresh_tokens(_session, _user_id, _now_utc):
         return 0
 
-    monkeypatch.setattr(UserRepository, "get_user_data_by_email", fake_get_user_data_by_email)
-    monkeypatch.setattr(UserRepository, "revoke_expired_refresh_tokens", fake_revoke_expired_refresh_tokens)
-    monkeypatch.setattr(UserRepository, "count_active_refresh_tokens", fake_count_active_refresh_tokens)
+    monkeypatch.setattr(
+        UserRepository, "get_user_data_by_email", fake_get_user_data_by_email
+    )
+    monkeypatch.setattr(
+        UserRepository,
+        "revoke_expired_refresh_tokens",
+        fake_revoke_expired_refresh_tokens,
+    )
+    monkeypatch.setattr(
+        UserRepository, "count_active_refresh_tokens", fake_count_active_refresh_tokens
+    )
     monkeypatch.setattr(users_routes, "verify_password", lambda _pwd, _hash: True)
 
     response = client.post("/users/login-user", json=_login_payload())
@@ -122,13 +133,17 @@ def test_login_user_success(client: TestClient, monkeypatch: pytest.MonkeyPatch)
     assert data["user"]["message"] == "User logged in successfully"
 
 
-def test_login_user_invalid_credentials(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+def test_login_user_invalid_credentials(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
     user = _make_user()
 
     async def fake_get_user_data_by_email(_session, _email, for_update=False):
         return user
 
-    monkeypatch.setattr(UserRepository, "get_user_data_by_email", fake_get_user_data_by_email)
+    monkeypatch.setattr(
+        UserRepository, "get_user_data_by_email", fake_get_user_data_by_email
+    )
     monkeypatch.setattr(users_routes, "verify_password", lambda _pwd, _hash: False)
 
     response = client.post("/users/login-user", json=_login_payload())
@@ -149,9 +164,17 @@ def test_login_user_max_devices(client: TestClient, monkeypatch: pytest.MonkeyPa
     async def fake_count_active_refresh_tokens(_session, _user_id, _now_utc):
         return 5
 
-    monkeypatch.setattr(UserRepository, "get_user_data_by_email", fake_get_user_data_by_email)
-    monkeypatch.setattr(UserRepository, "revoke_expired_refresh_tokens", fake_revoke_expired_refresh_tokens)
-    monkeypatch.setattr(UserRepository, "count_active_refresh_tokens", fake_count_active_refresh_tokens)
+    monkeypatch.setattr(
+        UserRepository, "get_user_data_by_email", fake_get_user_data_by_email
+    )
+    monkeypatch.setattr(
+        UserRepository,
+        "revoke_expired_refresh_tokens",
+        fake_revoke_expired_refresh_tokens,
+    )
+    monkeypatch.setattr(
+        UserRepository, "count_active_refresh_tokens", fake_count_active_refresh_tokens
+    )
     monkeypatch.setattr(users_routes, "verify_password", lambda _pwd, _hash: True)
     monkeypatch.setattr(users_routes.settings, "MAX_ACTIVE_DEVICES", 5)
 
@@ -167,22 +190,32 @@ def test_logout_user_success(client: TestClient, monkeypatch: pytest.MonkeyPatch
     async def fake_get_active_refresh_token(_session, _user_id, _hashed_token):
         return refresh_obj
 
-    monkeypatch.setattr(UserRepository, "get_active_refresh_token", fake_get_active_refresh_token)
+    monkeypatch.setattr(
+        UserRepository, "get_active_refresh_token", fake_get_active_refresh_token
+    )
 
-    response = client.post("/users/logout-user", json={"refresh_token": "refresh-token-12345"})
+    response = client.post(
+        "/users/logout-user", json={"refresh_token": "refresh-token-12345"}
+    )
 
     assert response.status_code == 200
     assert response.json()["message"] == "User logged out successfully"
     assert refresh_obj.is_revoked is True
 
 
-def test_logout_user_invalid_refresh_token(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+def test_logout_user_invalid_refresh_token(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
     async def fake_get_active_refresh_token(_session, _user_id, _hashed_token):
         return None
 
-    monkeypatch.setattr(UserRepository, "get_active_refresh_token", fake_get_active_refresh_token)
+    monkeypatch.setattr(
+        UserRepository, "get_active_refresh_token", fake_get_active_refresh_token
+    )
 
-    response = client.post("/users/logout-user", json={"refresh_token": "refresh-token-12345"})
+    response = client.post(
+        "/users/logout-user", json={"refresh_token": "refresh-token-12345"}
+    )
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Invalid or revoked refresh token"
@@ -196,10 +229,14 @@ def test_refresh_token_success(client: TestClient, monkeypatch: pytest.MonkeyPat
         is_revoked=False,
     )
 
-    async def fake_get_active_refresh_token(_session, _user_id, _hashed_token, now_utc=None, for_update=False):
+    async def fake_get_active_refresh_token(
+        _session, _user_id, _hashed_token, now_utc=None, for_update=False
+    ):
         return current_refresh
 
-    monkeypatch.setattr(UserRepository, "get_active_refresh_token", fake_get_active_refresh_token)
+    monkeypatch.setattr(
+        UserRepository, "get_active_refresh_token", fake_get_active_refresh_token
+    )
 
     response = client.post("/users/get-access-token-from-refresh-token")
 
@@ -211,10 +248,14 @@ def test_refresh_token_success(client: TestClient, monkeypatch: pytest.MonkeyPat
 
 
 def test_refresh_token_invalid(client: TestClient, monkeypatch: pytest.MonkeyPatch):
-    async def fake_get_active_refresh_token(_session, _user_id, _hashed_token, now_utc=None, for_update=False):
+    async def fake_get_active_refresh_token(
+        _session, _user_id, _hashed_token, now_utc=None, for_update=False
+    ):
         return None
 
-    monkeypatch.setattr(UserRepository, "get_active_refresh_token", fake_get_active_refresh_token)
+    monkeypatch.setattr(
+        UserRepository, "get_active_refresh_token", fake_get_active_refresh_token
+    )
 
     response = client.post("/users/get-access-token-from-refresh-token")
 
@@ -222,17 +263,23 @@ def test_refresh_token_invalid(client: TestClient, monkeypatch: pytest.MonkeyPat
     assert response.json()["detail"] == "Invalid or revoked refresh token"
 
 
-def test_refresh_token_session_expired(client: TestClient, monkeypatch: pytest.MonkeyPatch):
+def test_refresh_token_session_expired(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+):
     current_refresh = SimpleNamespace(
         session_expires_at=datetime.now(timezone.utc) - timedelta(seconds=5),
         device_info="ios",
         is_revoked=False,
     )
 
-    async def fake_get_active_refresh_token(_session, _user_id, _hashed_token, now_utc=None, for_update=False):
+    async def fake_get_active_refresh_token(
+        _session, _user_id, _hashed_token, now_utc=None, for_update=False
+    ):
         return current_refresh
 
-    monkeypatch.setattr(UserRepository, "get_active_refresh_token", fake_get_active_refresh_token)
+    monkeypatch.setattr(
+        UserRepository, "get_active_refresh_token", fake_get_active_refresh_token
+    )
 
     response = client.post("/users/get-access-token-from-refresh-token")
 

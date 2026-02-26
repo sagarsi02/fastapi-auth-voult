@@ -20,7 +20,7 @@ class UserSignUpRequest(BaseModel):
     mobile_number: int
     confirm_password: str
     city: Optional[str] = None
-    
+
 
 class UserSignUpResponse(BaseModel):
     """Response returned after a successful registration."""
@@ -31,10 +31,8 @@ class UserSignUpResponse(BaseModel):
     is_active: bool
     is_verified: bool
     message: str
-    
-    model_config = {
-        "from_attributes": True
-    }
+
+    model_config = {"from_attributes": True}
 
 
 class UserDetailesResponse(BaseModel):
@@ -50,14 +48,15 @@ class UserDetailesResponse(BaseModel):
     # Allow loading from ORM-like objects when needed.
     model_config = ConfigDict(from_attributes=True)
 
+
 class UserLogoutRequest(BaseModel):
     refresh_token: str = Field(..., min_length=10)
+
 
 class UserLogoutResponse(BaseModel):
     """Response returned after a successful logout."""
 
     message: str
-
 
 
 class UserNotFoundResponse(BaseModel):

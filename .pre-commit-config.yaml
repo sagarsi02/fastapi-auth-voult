@@ -1,0 +1,35 @@
+ci:
+  autofix_commit_msg: "🎨 [pre-commit.ci] Auto format from pre-commit.com hooks"
+  autoupdate_commit_msg: "⬆ [pre-commit.ci] pre-commit autoupdate"
+
+default_language_version:
+  python: python3.12  # Set default Python version to 3.12
+
+repos:
+  # ✅ Basic pre-commit hooks for file integrity checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0  # Use the latest stable version
+    hooks:
+      - id: check-toml  # Ensures valid TOML syntax
+      - id: check-yaml  # Ensures valid YAML syntax (uses --unsafe for broader checks)
+        args: [--unsafe]
+        exclude: ^helm-chart/.*\.ya?ml$
+      - id: end-of-file-fixer  # Ensures files end with a newline (best practice)
+      - id: trailing-whitespace  # Removes trailing whitespaces in all files
+
+  # ✅ Enforce Python code quality & formatting using Ruff
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.4  # Use the latest stable version
+    hooks:
+      - id: ruff  # Runs Ruff to check for linting errors (including naming conventions)
+        args:
+          - --fix  # Automatically fixes issues when possible
+      - id: ruff-format  # Ensures code is formatted using Ruff
+
+  # ✅ Enforce Conventional Commits with Commitizen
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.4.1
+    hooks:
+      - id: commitizen  # Enforces proper commit messages based on commit conventions
+        stages: [commit-msg]  # Enforce commit message format
+        fail_fast: true  # Fail immediately on incorrect commit messages

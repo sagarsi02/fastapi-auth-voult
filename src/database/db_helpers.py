@@ -44,6 +44,7 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False,
 )
 
+
 @asynccontextmanager
 async def get_db_session() -> AsyncIterator[AsyncSession]:
     """Yield an async session with automatic cleanup."""
